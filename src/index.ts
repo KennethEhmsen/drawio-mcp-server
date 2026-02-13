@@ -18,6 +18,14 @@ import {
 } from "./mcp_server_logger.js";
 
 const PORT = parseInt(process.env.WS_PORT ?? "3333", 10);
+if (isNaN(PORT) || PORT < 1 || PORT > 65535) {
+  console.error(
+    `[config] Invalid WS_PORT value: '${process.env.WS_PORT}'. Must be a number between 1 and 65535.`,
+  );
+  process.exit(1);
+}
+
+const MAX_CONNECTIONS = 5;
 
 async function checkPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -52,6 +60,13 @@ emitter.on(bus_request_stream, bus_to_ws_forwarder_listener);
 const ws_handler: uWS.WebSocketBehavior<unknown> = {
   maxPayloadLength: 128 * 1024,
   open: (ws) => {
+    if (conns.length >= MAX_CONNECTIONS) {
+      log.debug(
+        `[ws_handler] Rejecting connection: max connections (${MAX_CONNECTIONS}) reached`,
+      );
+      ws.close();
+      return;
+    }
     log.debug(
       `[ws_handler] A WebSocket client #${conns.length} connected, presumably MCP Extension!`,
     );
@@ -60,13 +75,23 @@ const ws_handler: uWS.WebSocketBehavior<unknown> = {
   message: (ws, message, isBinary) => {
     const decoder = new TextDecoder();
     const str = decoder.decode(message);
+    let json: unknown;
     try {
-      const json = JSON.parse(str);
-      log.debug(`[ws] received from Extension`, json);
-      emitter.emit(bus_reply_stream, json);
+      json = JSON.parse(str);
     } catch (e) {
       log.debug(`[ws] received invalid JSON from Extension, ignoring message`);
+      return;
     }
+    if (
+      typeof json !== "object" ||
+      json === null ||
+      typeof (json as Record<string, unknown>).__event !== "string"
+    ) {
+      log.debug(`[ws] received message without valid __event field, ignoring`);
+      return;
+    }
+    log.debug(`[ws] received from Extension`, json);
+    emitter.emit(bus_reply_stream, json);
   },
   close: (ws, code, message) => {
     log.debug(`[ws_handler] WebSocket client closed with code ${code}`);
@@ -93,7 +118,7 @@ async function start_websocket_server() {
   const app = uWS
     .App()
     .ws("/*", ws_handler)
-    .listen(PORT, (token) => {
+    .listen("127.0.0.1", PORT, (token) => {
       if (token) {
         log.debug(`[start_websocket_server] Listening to port ${PORT}`);
       } else {

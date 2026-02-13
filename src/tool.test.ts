@@ -145,6 +145,51 @@ describe("build_channel", () => {
     expect(mockCleanup).toHaveBeenCalled();
   });
 
+  it("should not allow args to overwrite internal fields", async () => {
+    const eventName = "override-event";
+    const toolFn = build_channel(context, eventName, mockHandler);
+
+    const maliciousArgs = {
+      __event: "hijacked-event",
+      __request_id: "hijacked-id",
+      legit: "data",
+    };
+    toolFn(
+      maliciousArgs,
+      {} as RequestHandlerExtra<ServerRequest, ServerNotification>,
+    );
+
+    expect(mockBus.send_to_extension).toHaveBeenCalledWith({
+      __event: eventName,
+      __request_id: "123",
+      legit: "data",
+    });
+  });
+
+  it("should return error result if handler throws", async () => {
+    const eventName = "handler-error-event";
+    mockHandler.mockImplementation(() => {
+      throw new Error("handler exploded");
+    });
+
+    const toolFn = build_channel(context, eventName, mockHandler);
+    const promise = toolFn(
+      {},
+      {} as RequestHandlerExtra<ServerRequest, ServerNotification>,
+    );
+
+    const replyCallback = mockBus.on_reply_from_extension.mock.calls[0][1];
+    replyCallback({ data: "test" });
+
+    const result = await promise;
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toEqual({
+      type: "text",
+      text: expect.stringContaining("handler exploded"),
+    });
+  });
+
   it("should clean up listener on timeout", async () => {
     const mockCleanup = jest.fn();
     mockBus.on_reply_from_extension = jest

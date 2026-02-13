@@ -28,9 +28,9 @@ export function build_channel<S>(
     const request_id = id_generator.generate();
     const reply_name = `${event_name}.${request_id}`;
     bus.send_to_extension({
+      ..._args,
       __event: event_name,
       __request_id: request_id,
-      ..._args,
     });
     log.debug(`[${event_name}] emitted, waiting for reply @${reply_name}`);
 
@@ -59,10 +59,21 @@ export function build_channel<S>(
           clearTimeout(timeoutId);
           cleanup();
           log.debug(`[${reply_name}] received response`, reply);
-          const data = strip_internal_fields(reply);
-
-          const response = handler(data);
-          resolve(response);
+          try {
+            const data = strip_internal_fields(reply);
+            const response = handler(data);
+            resolve(response);
+          } catch (err) {
+            resolve({
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: `Tool '${event_name}' handler error: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              ],
+            });
+          }
         },
       );
     });

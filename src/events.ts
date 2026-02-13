@@ -8,9 +8,9 @@ export function strip_internal_fields<T extends Record<string, any>>(
 ): Omit<T, `__${string}`> {
   const result: Partial<T> = {};
 
-  for (const key in obj) {
+  for (const key of Object.keys(obj)) {
     if (!key.startsWith("__")) {
-      result[key] = obj[key];
+      result[key as keyof T] = obj[key as keyof T];
     }
   }
 
