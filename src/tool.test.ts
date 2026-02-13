@@ -17,9 +17,11 @@ describe("build_channel", () => {
   const log = create_logger();
 
   beforeEach(() => {
+    jest.useFakeTimers();
+
     mockBus = {
       send_to_extension: jest.fn(),
-      on_reply_from_extension: jest.fn(),
+      on_reply_from_extension: jest.fn().mockReturnValue(jest.fn()),
     } as unknown as jest.Mocked<Bus>;
 
     mockIdGenerator = {
@@ -33,6 +35,11 @@ describe("build_channel", () => {
     };
 
     mockHandler.mockReset();
+  });
+
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
   });
 
   it("should create a function that sends a message via bus", async () => {
@@ -91,6 +98,72 @@ describe("build_channel", () => {
       expect.any(Function),
     );
   });
+
+  it("should timeout and return error if no reply is received", async () => {
+    const eventName = "timeout-event";
+    const toolFn = build_channel(context, eventName, mockHandler, 100);
+
+    const promise = toolFn(
+      {},
+      {} as RequestHandlerExtra<ServerRequest, ServerNotification>,
+    );
+
+    await jest.advanceTimersByTimeAsync(100);
+
+    const result = await promise;
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toEqual({
+      type: "text",
+      text: expect.stringContaining("timed out"),
+    });
+  });
+
+  it("should clean up listener after receiving reply", async () => {
+    const mockCleanup = jest.fn();
+    mockBus.on_reply_from_extension = jest
+      .fn()
+      .mockReturnValue(mockCleanup) as any;
+
+    const eventName = "cleanup-event";
+    const mockResponse: CallToolResult = {
+      content: [{ type: "text", text: "response" }],
+    };
+    mockHandler.mockReturnValue(mockResponse);
+
+    const toolFn = build_channel(context, eventName, mockHandler);
+    const promise = toolFn(
+      {},
+      {} as RequestHandlerExtra<ServerRequest, ServerNotification>,
+    );
+
+    const replyCallback = mockBus.on_reply_from_extension.mock.calls[0][1];
+    replyCallback({ data: "test" });
+
+    await promise;
+
+    expect(mockCleanup).toHaveBeenCalled();
+  });
+
+  it("should clean up listener on timeout", async () => {
+    const mockCleanup = jest.fn();
+    mockBus.on_reply_from_extension = jest
+      .fn()
+      .mockReturnValue(mockCleanup) as any;
+
+    const eventName = "timeout-cleanup-event";
+    const toolFn = build_channel(context, eventName, mockHandler, 100);
+
+    const promise = toolFn(
+      {},
+      {} as RequestHandlerExtra<ServerRequest, ServerNotification>,
+    );
+
+    await jest.advanceTimersByTimeAsync(100);
+    await promise;
+
+    expect(mockCleanup).toHaveBeenCalled();
+  });
 });
 
 describe("default_tool", () => {
@@ -100,10 +173,13 @@ describe("default_tool", () => {
   let context: Context;
 
   beforeEach(() => {
+    jest.useFakeTimers();
+
     mockBus = {
       send_to_extension: jest.fn(),
       on_reply_from_extension: jest.fn((_, callback: BusListener<unknown>) => {
         callback({ test: "data" });
+        return jest.fn();
       }),
     } as unknown as jest.Mocked<Bus>;
 
@@ -116,6 +192,11 @@ describe("default_tool", () => {
       id_generator: mockIdGenerator,
       log,
     };
+  });
+
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
   });
 
   it("should create a tool that returns JSON stringified response", async () => {

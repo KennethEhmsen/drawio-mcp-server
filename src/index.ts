@@ -7,13 +7,7 @@ import EventEmitter from "node:events";
 import { createServer } from "node:net";
 
 import uWS from "uWebSockets.js";
-import {
-  Bus,
-  bus_reply_stream,
-  bus_request_stream,
-  BusListener,
-  Context,
-} from "./types.js";
+import { bus_reply_stream, bus_request_stream, Context } from "./types.js";
 import { create_bus } from "./emitter_bus.js";
 import { default_tool } from "./tool.js";
 import { nanoid_id_generator } from "./nanoid_id_generator.js";
@@ -23,7 +17,7 @@ import {
   validLogLevels,
 } from "./mcp_server_logger.js";
 
-const PORT = 3333;
+const PORT = parseInt(process.env.WS_PORT ?? "3333", 10);
 
 async function checkPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -64,17 +58,25 @@ const ws_handler: uWS.WebSocketBehavior<unknown> = {
     conns.push(ws);
   },
   message: (ws, message, isBinary) => {
-    // ws.send(message, isBinary);
     const decoder = new TextDecoder();
     const str = decoder.decode(message);
-    const json = JSON.parse(str);
-    log.debug(`[ws] received from Extension`, json);
-    // const event_name = message.__event;
-    emitter.emit(bus_reply_stream, json);
+    try {
+      const json = JSON.parse(str);
+      log.debug(`[ws] received from Extension`, json);
+      emitter.emit(bus_reply_stream, json);
+    } catch (e) {
+      log.debug(`[ws] received invalid JSON from Extension, ignoring message`);
+    }
   },
   close: (ws, code, message) => {
     log.debug(`[ws_handler] WebSocket client closed with code ${code}`);
-    //todo remove conn
+    const index = conns.indexOf(ws);
+    if (index !== -1) {
+      conns.splice(index, 1);
+      log.debug(
+        `[ws_handler] Removed disconnected client, ${conns.length} remaining`,
+      );
+    }
   },
 };
 

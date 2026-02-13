@@ -7,7 +7,7 @@ export type Bus = {
   on_reply_from_extension: <RL>(
     event_name: string,
     listener: BusListener<RL>,
-  ) => void;
+  ) => () => void;
 };
 export type IdGenerator = {
   generate: () => string;

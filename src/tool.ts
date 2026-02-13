@@ -1,4 +1,4 @@
-import { Bus, Context } from "./types.js";
+import { Context } from "./types.js";
 import {
   CallToolResult,
   ServerNotification,
@@ -13,17 +13,19 @@ export type ToolFn<S> = (
   extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
 ) => Promise<CallToolResult>;
 
+export const DEFAULT_TIMEOUT_MS = 30_000;
+
 export function build_channel<S>(
   { bus, id_generator, log }: Context,
   event_name: string,
   handler: Handler,
+  timeout_ms: number = DEFAULT_TIMEOUT_MS,
 ) {
   const fn: ToolFn<S> = async (
     _args: S,
     _extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
   ) => {
     const request_id = id_generator.generate();
-    // const event_name = `get-selected-cell`;
     const reply_name = `${event_name}.${request_id}`;
     bus.send_to_extension({
       __event: event_name,
@@ -32,17 +34,37 @@ export function build_channel<S>(
     });
     log.debug(`[${event_name}] emitted, waiting for reply @${reply_name}`);
 
-    const p: Promise<CallToolResult> = new Promise((resolve, _reject) => {
+    const p: Promise<CallToolResult> = new Promise((resolve) => {
       log.debug(`[${event_name}] waiting for response @${reply_name}`);
 
-      bus.on_reply_from_extension(reply_name, (reply: Record<string, any>) => {
-        // bus.on(reply_name, (args) => {
-        log.debug(`[${reply_name}] received response`, reply);
-        const data = strip_internal_fields(reply);
+      let cleanup: () => void = () => {};
 
-        const response = handler(data);
-        resolve(response);
-      });
+      const timeoutId = setTimeout(() => {
+        cleanup();
+        log.debug(`[${event_name}] timed out after ${timeout_ms}ms`);
+        resolve({
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Tool '${event_name}' timed out waiting for response from Draw.io extension. Ensure the extension is connected.`,
+            },
+          ],
+        });
+      }, timeout_ms);
+
+      cleanup = bus.on_reply_from_extension(
+        reply_name,
+        (reply: Record<string, any>) => {
+          clearTimeout(timeoutId);
+          cleanup();
+          log.debug(`[${reply_name}] received response`, reply);
+          const data = strip_internal_fields(reply);
+
+          const response = handler(data);
+          resolve(response);
+        },
+      );
     });
 
     return p;

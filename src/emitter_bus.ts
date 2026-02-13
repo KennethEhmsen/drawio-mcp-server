@@ -1,17 +1,8 @@
 import { EventEmitter } from "node:events";
-import {
-  Bus,
-  bus_reply_stream,
-  bus_request_stream,
-  BusListener,
-  Logger,
-} from "./types.js";
-
-type BusListenerList = BusListener<any>[];
+import { Bus, bus_reply_stream, bus_request_stream, Logger } from "./types.js";
 
 export function create_bus(log: Logger) {
   return function (emitter: EventEmitter): Bus {
-    const listeners: BusListenerList = [];
     const bus: Bus = {
       send_to_extension: (request) => {
         log.debug(`[bus] sending to Extension`, request);
@@ -25,7 +16,9 @@ export function create_bus(log: Logger) {
           }
         };
         emitter.on(bus_reply_stream, listener);
-        listeners.push(reply);
+        return () => {
+          emitter.off(bus_reply_stream, listener);
+        };
       },
     };
     return bus;

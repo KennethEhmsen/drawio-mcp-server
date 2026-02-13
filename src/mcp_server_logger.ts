@@ -40,29 +40,28 @@ const SetLevelRequestSchema = z.object({
   }),
 });
 
-// Per-logger log levels (default is root `"."`)
-let logLevels: { [loggerName: string]: LogLevelValue } = {
-  ".": LogLevelMap.info, // Start with info level
-};
+export function create_logger(server: McpServer): Logger {
+  // Per-logger log levels (default is root `"."`)
+  const logLevels: { [loggerName: string]: LogLevelValue } = {
+    ".": LogLevelMap.info, // Start with info level
+  };
 
-// Helper: Effective log level for a logger
-const getEffectiveLogLevel = (loggerName: string): LogLevelValue => {
-  return loggerName in logLevels
-    ? logLevels[loggerName]
-    : (logLevels["."] ?? LogLevelMap.info);
-};
+  // Helper: Effective log level for a logger
+  const getEffectiveLogLevel = (loggerName: string): LogLevelValue => {
+    return loggerName in logLevels
+      ? logLevels[loggerName]
+      : (logLevels["."] ?? LogLevelMap.info);
+  };
 
-// Helper: Should we log at this level?
-const shouldLog = (level: McpLogLevel, loggerName: string): boolean => {
-  const numericLevel = LogLevelMap[level];
-  const effectiveLevel = getEffectiveLogLevel(loggerName);
-  return numericLevel <= effectiveLevel;
-};
+  // Helper: Should we log at this level?
+  const shouldLog = (level: McpLogLevel, loggerName: string): boolean => {
+    const numericLevel = LogLevelMap[level];
+    const effectiveLevel = getEffectiveLogLevel(loggerName);
+    return numericLevel <= effectiveLevel;
+  };
 
-// Helper: Actually send a log if allowed
-const log =
-  (server: McpServer) =>
-  (level: McpLogLevel, loggerName: string, data: object) => {
+  // Helper: Actually send a log if allowed
+  const logFn = (level: McpLogLevel, loggerName: string, data: object) => {
     if (!(level in LogLevelMap)) {
       console.error(`Internal Error: Invalid log level used: ${level}`);
       return;
@@ -76,10 +75,7 @@ const log =
     }
   };
 
-export function create_logger(server: McpServer): Logger {
-  const log3 = log(server);
-
-  // 2. Register handler for logging/setLevels (only override requested loggers)
+  // Register handler for logging/setLevels (only override requested loggers)
   server.server.setRequestHandler(SetLevelsRequestSchema, async (request) => {
     const newLevels = request.params.levels;
     // Only update logLevels for specified keys; unset any set to null
@@ -89,7 +85,7 @@ export function create_logger(server: McpServer): Logger {
         if (levelName === null) {
           if (loggerName !== ".") {
             delete logLevels[loggerName]; // Remove override
-            log3("debug", "logging", {
+            logFn("debug", "logging", {
               message: `Reset log level for logger: ${loggerName}`,
             });
           }
@@ -98,11 +94,11 @@ export function create_logger(server: McpServer): Logger {
           validLogLevels.includes(levelName as McpLogLevel)
         ) {
           logLevels[loggerName] = LogLevelMap[levelName as McpLogLevel];
-          log3("debug", "logging", {
+          logFn("debug", "logging", {
             message: `Set log level for logger '${loggerName}' to '${levelName}'`,
           });
         } else {
-          log3("warning", "logging", {
+          logFn("warning", "logging", {
             message: `Invalid log level '${levelName}' received for logger '${loggerName}'`,
           });
         }
@@ -113,15 +109,14 @@ export function create_logger(server: McpServer): Logger {
 
   // Register handler for logging/setLevel (sets root logger level)
   server.server.setRequestHandler(SetLevelRequestSchema, async (request) => {
-    const log3 = log(server);
     const levelName = request.params.level;
     if (validLogLevels.includes(levelName as McpLogLevel)) {
       logLevels["."] = LogLevelMap[levelName as McpLogLevel];
-      log3("debug", "logging", {
+      logFn("debug", "logging", {
         message: `Set root log level to '${levelName}'`,
       });
     } else {
-      log3("warning", "logging", {
+      logFn("warning", "logging", {
         message: `Invalid log level '${levelName}' received`,
       });
     }
@@ -130,10 +125,10 @@ export function create_logger(server: McpServer): Logger {
 
   return {
     log: (level, message, ...data) => {
-      log3(level as McpLogLevel, ".", { message, data });
+      logFn(level as McpLogLevel, ".", { message, data });
     },
     debug: (message, ...data) => {
-      log3("debug" as McpLogLevel, ".", { message, data });
+      logFn("debug" as McpLogLevel, ".", { message, data });
     },
   };
 }

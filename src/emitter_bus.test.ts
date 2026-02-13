@@ -80,4 +80,26 @@ describe("create_bus", () => {
     expect(mockReply1).toHaveBeenCalledWith(matchingEvent);
     expect(mockReply2).not.toHaveBeenCalled();
   });
+
+  it("should return a cleanup function that removes the listener", () => {
+    const mockReply = jest.fn();
+    const eventName = "cleanup-event";
+
+    const cleanup = bus.on_reply_from_extension(eventName, mockReply);
+
+    // Listener should work before cleanup
+    const event = { __event: eventName, data: "before-cleanup" };
+    emitter.emit(bus_reply_stream, event);
+    expect(mockReply).toHaveBeenCalledWith(event);
+
+    mockReply.mockClear();
+
+    // Call cleanup
+    cleanup();
+
+    // Listener should no longer fire after cleanup
+    const event2 = { __event: eventName, data: "after-cleanup" };
+    emitter.emit(bus_reply_stream, event2);
+    expect(mockReply).not.toHaveBeenCalled();
+  });
 });
